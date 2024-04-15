@@ -10,7 +10,7 @@ def lambda_handler(event, context):
     aws_region = os.environ.get("AWS_REGION")
     channel_id = os.environ.get("CHANNEL_ID")
     db_name = os.environ.get("DB_NAME")
-    max_results = os.environ.get("MAX_RESULTS")
+    max_results = int(os.environ.get("MAX_RESULTS"))
     alarm_name = event["alarmData"]["alarmName"]
     alarm_link = "https://{0}.console.aws.amazon.com/cloudwatch/home?region={0}#alarmsV2:alarm/{1}".format(
         aws_region, alarm_name
@@ -95,8 +95,6 @@ def lambda_handler(event, context):
                     {
                         "type": "button",
                         "text": {"type": "plain_text", "text": "View Alarm"},
-                        "value": "Cloudwatch Alarm-AWS",
-                        "action_id": "actionId-0",
                         "url": alarm_link,
                     }
                 ],
@@ -117,7 +115,6 @@ def lambda_handler(event, context):
     )
 
     response = json.loads(urlopen(req).read().decode("utf-8"))
-    print(response)
     message_ts = response["message"]["ts"]
 
     data = {"channel": channel_id, "blocks": query_data, "thread_ts": message_ts}
@@ -129,4 +126,3 @@ def lambda_handler(event, context):
         method="POST",
     )
     response = json.loads(urlopen(req).read().decode("utf-8"))
-    print(response)

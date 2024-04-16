@@ -1,0 +1,162 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Cloudfront + Lambda@edge deployment stack.
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+  ChannelId:
+    Type: String
+    Description: Channel ID of the slack channel
+  DbName:
+    Type: String
+    Description: Database Name for the RDS database
+  EvaluationPeriod:
+    Type: String
+    Description: Evaluation period for the RDS alerts
+    Default: 60
+  FunctionName:
+    Type: String
+    Description: Function name for lambda function
+    Default: rds-slack-notifications
+  MaxResults:
+    Type: String
+    Description: No of results in top queries notification
+    Default: 5
+  MetricName:
+    Type: String
+    Description: Metric to be monitored
+    Default: CPUUtilization
+  ProjectName:
+    Type: String
+    Description: Project name or app name.
+    Default: rds-cpu-utilization
+  SlackOAuthToken:
+    Type: String
+    Description: OAuth Token for API request to slack
+
+Resources:
+  SlackNotification:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code: ./alert-notification
+      MemorySize: 128
+      Timeout: 3
+      FunctionName: !Ref FunctionName
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.12
+      Architectures:
+        - x86_64
+      EphemeralStorage:
+        Size: 512
+      Environment:
+        Variables:
+          ACCOUNT_ID: !Ref AWS::AccountId
+          CHANNEL_ID: !Ref ChannelId
+          DB_NAME: !Ref DbName
+          MAX_RESULTS: !Ref MaxResults
+          SLACK_OAUTH_TOKEN: !Ref SlackOAuthToken
+      PackageType: Zip
+      Role: !GetAtt LambdaExecutionRole.Arn
+      SnapStart:
+        ApplyOn: None
+      Timeout: 60
+
+  LambdaExecutionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "lambda.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${FunctionName}:*"
+              - Effect: Allow
+                Action:
+                  - rds:DescribeDBInstances
+                Resource:
+                  - !Sub "arn:aws:rds:${AWS::Region}:${AWS::AccountId}:db:${DbName}"
+              - Effect: Allow
+                Action:
+                  - pi:DescribeDimensionKeys
+                Resource:
+                  - !Sub "arn:aws:pi:${AWS::Region}:${AWS::AccountId}:metrics/rds/*"
+
+
+  RDSAlarmCriticalSeverity:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "Critical-CPU-Utilisation-${DbName}"
+      AlarmDescription: CPU Utilisation has crossed a threshold 90% over a period of 1 min.
+      ActionsEnabled: true
+      OKActions: []
+      AlarmActions:
+          - !GetAtt SlackNotification.Arn
+      InsufficientDataActions: []
+      MetricName: CPUUtilization
+      Namespace: AWS/RDS
+      Statistic: Average
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref DbName
+      Period: !Ref EvaluationPeriod
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 90
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: breaching
+
+  RDSAlarmWarningSeverity:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "Warning-CPU-Utilisation-${DbName}"
+      AlarmDescription: !Sub "CPU Utilisation has crossed the threshold of 70% over a period of 1 min"
+      ActionsEnabled: true
+      OKActions: []
+      AlarmActions:
+          - !GetAtt SlackNotification.Arn
+      InsufficientDataActions: []
+      MetricName: !Ref MetricName
+      Namespace: AWS/RDS
+      Statistic: Average
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref DbName
+      Period: !Ref EvaluationPeriod
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 70
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: breaching
+
+  LambdaPermissionAlarm1:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !Ref SlackNotification
+      Principal: "lambda.alarms.cloudwatch.amazonaws.com"
+      SourceArn: !GetAtt RDSAlarmCriticalSeverity.Arn
+
+  LambdaPermissionAlarm2:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !Ref SlackNotification
+      Principal: "lambda.alarms.cloudwatch.amazonaws.com"
+      SourceArn: !GetAtt RDSAlarmWarningSeverity.Arn

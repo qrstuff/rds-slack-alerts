@@ -21,6 +21,10 @@ Parameters:
     Type: String
     Description: No of results in top queries notification
     Default: 5
+  MetricName:
+    Type: String
+    Description: Metric to be monitored
+    Default: CPUUtilization
   ProjectName:
     Type: String
     Description: Project name or app name.
@@ -128,7 +132,7 @@ Resources:
       AlarmActions:
           - !GetAtt SlackNotification.Arn
       InsufficientDataActions: []
-      MetricName: CPUUtilization
+      MetricName: !Ref MetricName
       Namespace: AWS/RDS
       Statistic: Average
       Dimensions:
